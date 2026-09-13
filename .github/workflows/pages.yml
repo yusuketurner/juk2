@@ -18,6 +18,35 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Normalize image URLs
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+          p=Path('index.html')
+          s=p.read_text(encoding='utf-8')
+          base='https://raw.githubusercontent.com/yusuketurner/juk/main/'
+          names={
+            '21_29_30%20(1).png':'ChatGPT%20Image%202026%E5%B9%B49%E6%9C%8810%E6%97%A5%2021_29_30%20(1).png',
+            '21_29_31%20(2).png':'ChatGPT%20Image%202026%E5%B9%B49%E6%9C%8810%E6%97%A5%2021_29_31%20(2).png',
+            '21_31_27.png':'ChatGPT%20Image%202026%E5%B9%B49%E6%9C%8810%E6%97%A5%2021_31_27.png',
+            '22_22_24.png':'ChatGPT%20Image%202026%E5%B9%B49%E6%9C%8810%E6%97%A5%2022_22_24.png',
+            '22_25_05.png':'ChatGPT%20Image%202026%E5%B9%B49%E6%9C%8810%E6%97%A5%2022_25_05.png',
+          }
+          def fix(m):
+            u=m.group(0)
+            for suffix,canonical in names.items():
+              if u.endswith(suffix):
+                return base+canonical
+            return u
+          s=re.sub(r'https://raw\.githubusercontent\.com/[^\"\']+',fix,s)
+          p.write_text(s,encoding='utf-8')
+          bad=[]
+          for u in re.findall(r'https://raw\.githubusercontent\.com/[^\"\']+',s):
+            if not any(u.endswith(v) for v in names.values()) and not u.endswith('.jpeg'):
+              bad.append(u)
+          if bad:
+            raise SystemExit('Unnormalized image URLs: '+repr(bad))
       - name: Configure Pages
         uses: actions/configure-pages@v5
       - name: Upload artifact
