@@ -27,16 +27,17 @@ jobs:
           s = p.read_text(encoding='utf-8')
           raw = 'https://raw.githubusercontent.com/yusuketurner/juk/main/'
           cdn = 'https://cdn.jsdelivr.net/gh/yusuketurner/juk@main/'
-          # Use a CDN for repository images so GitHub Pages can load every supplied photo reliably.
           s = s.replace(raw, cdn)
-          # Fix the one malformed encoded filename in the second gallery row.
-          s = s.replace('22_22_24.png', '22_22_24.png')
-          s = s.replace('%E5%B9%B49%E6%9C%A0%E6%97%A5', '%E5%B9%B49%E6%9C%8810%E6%97%A5')
+          # Repair the malformed encoded path used once in the second gallery row.
+          s = re.sub(
+              r'https://cdn\.jsdelivr\.net/gh/yusuketurner/juk@main/[^\"\']*22_22_24\.png',
+              cdn + 'ChatGPT%20Image%202026%E5%B9%B49%E6%9C%8810%E6%97%A5%2022_22_24.png',
+              s,
+          )
           p.write_text(s, encoding='utf-8')
           urls = re.findall(r'https://cdn\.jsdelivr\.net/gh/yusuketurner/juk@main/[^\"\']+', s)
           if not urls:
             raise SystemExit('No CDN image URLs found')
-          # Every image reference must point at the CDN after normalization.
           if 'raw.githubusercontent.com/yusuketurner/juk/main/' in s:
             raise SystemExit('Raw GitHub image URL remains')
       - name: Configure Pages
