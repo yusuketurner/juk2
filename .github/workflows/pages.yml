@@ -18,28 +18,77 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Normalize image URLs
+
+      - name: Download and localize all image URLs
         shell: python
         run: |
           from pathlib import Path
-          import re
+          from urllib.parse import urlsplit, unquote, quote
+          from urllib.request import Request, urlopen
+          import hashlib, re
+
           p = Path('index.html')
           s = p.read_text(encoding='utf-8')
-          raw = 'https://raw.githubusercontent.com/yusuketurner/juk/main/'
-          cdn = 'https://cdn.jsdelivr.net/gh/yusuketurner/juk@main/'
-          s = s.replace(raw, cdn)
-          # Repair the malformed encoded path used once in the second gallery row.
-          s = re.sub(
-              r'https://cdn\.jsdelivr\.net/gh/yusuketurner/juk@main/[^\"\']*22_22_24\.png',
-              cdn + 'ChatGPT%20Image%202026%E5%B9%B49%E6%9C%8810%E6%97%A5%2022_22_24.png',
-              s,
-          )
-          p.write_text(s, encoding='utf-8')
-          urls = re.findall(r'https://cdn\.jsdelivr\.net/gh/yusuketurner/juk@main/[^\"\']+', s)
+          pattern = re.compile(r'https://(?:raw\.githubusercontent\.com/yusuketurner/juk/main/|cdn\.jsdelivr\.net/gh/yusuketurner/juk@main/)[^\"\'\s<>)]+')
+          urls = list(dict.fromkeys(pattern.findall(s)))
           if not urls:
-            raise SystemExit('No CDN image URLs found')
-          if 'raw.githubusercontent.com/yusuketurner/juk/main/' in s:
-            raise SystemExit('Raw GitHub image URL remains')
+              raise SystemExit('No source image URLs found in index.html')
+
+          out = Path('assets/linked')
+          out.mkdir(parents=True, exist_ok=True)
+
+          replacements = {}
+          for url in urls:
+              parts = urlsplit(url)
+              path = parts.path
+              if '/juk@main/' in path:
+                  path = path.split('/juk@main/', 1)[1]
+              elif '/juk/main/' in path:
+                  path = path.split('/juk/main/', 1)[1]
+              path = unquote(unquote(path))
+              if not path:
+                  raise SystemExit(f'Empty image path: {url}')
+
+              filename = Path(path).name
+              safe_name = re.sub(r'[^A-Za-z0-9._-]+', '_', filename)
+              key = hashlib.sha256(path.encode('utf-8')).hexdigest()[:12]
+              target = out / f'{key}-{safe_name}'
+
+              raw_url = 'https://raw.githubusercontent.com/yusuketurner/juk/main/' + quote(path, safe='/')
+              if not target.exists():
+                  req = Request(raw_url, headers={'User-Agent': 'github-actions-pages'})
+                  try:
+                      with urlopen(req, timeout=60) as r:
+                          target.write_bytes(r.read())
+                  except Exception as e:
+                      raise SystemExit(f'Failed to download {path}: {e}')
+
+              if target.stat().st_size == 0:
+                  raise SystemExit(f'Empty downloaded image: {target}')
+              replacements[url] = target.as_posix()
+
+          for old, new in replacements.items():
+              s = s.replace(old, new)
+
+          p.write_text(s, encoding='utf-8')
+
+          # Hard validation: every remaining <img src> must resolve to a local file,
+          # a data URI, or an intentional non-http source. No remote image URL may
+          # reach the published Pages artifact.
+          srcs = re.findall(r'<img\b[^>]*\bsrc=[\"\']([^\"\']+)', s, flags=re.I)
+          bad = []
+          for src in srcs:
+              if src.startswith(('data:', 'blob:', '#')):
+                  continue
+              if re.match(r'^https?://', src, flags=re.I):
+                  bad.append(f'remote: {src}')
+                  continue
+              if not Path(src).is_file():
+                  bad.append(f'missing: {src}')
+          if bad:
+              raise SystemExit('Image validation failed:\n' + '\n'.join(bad))
+          print(f'Localized {len(urls)} unique image URLs; validated {len(srcs)} img elements.')
+
       - name: Configure Pages
         uses: actions/configure-pages@v5
       - name: Upload artifact
